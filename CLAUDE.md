@@ -29,7 +29,7 @@ This is a **Model Context Protocol (MCP) server** that enables AI assistants lik
 
 ### Available Tools
 
-The server exposes 10 MCP tools for Grouper operations:
+The server exposes 15 MCP tools for Grouper operations:
 
 #### Group Operations
 - `create_group` - Create new groups with optional display name and description
@@ -40,6 +40,9 @@ The server exposes 10 MCP tools for Grouper operations:
 #### Member Operations
 - `add_group_member` - Add subjects to groups (with configurable source ID)
 - `delete_group_member` - Remove subjects from groups
+- `has_member` - Check if a subject is a member of a group
+- `trace_membership` - Trace a subject's membership path to a group
+- `get_subject_memberships` - Get all group memberships for a subject with optional filtering by group name substring
 
 #### Privilege Operations
 - `assign_privilege` - Grant privileges (read, admin, update, view, optin, optout) to subjects
@@ -99,6 +102,9 @@ Add to Claude Desktop config file:
 }
 ```
 
+## API Documentation
+- https://grouperws.uchicago.edu/web/docs/
+
 ## API Endpoints Used
 
 All endpoints are under `/web/servicesRest/v4_0_*`:
@@ -112,6 +118,8 @@ All endpoints are under `/web/servicesRest/v4_0_*`:
 - `/v4_0_220/groups` - Delete members
 - `/v4_0_270/attributeDefNames` - Find attribute definitions
 - `/v4_0_280/subjects` - Search subjects
+- `/v4_0_290/groups` - Check membership (has_member)
+- `/v4_0_120/memberships` - Get memberships for tracing
 
 ## Security Considerations
 
@@ -130,6 +138,8 @@ Once integrated with Claude Desktop, you can use natural language:
 - "Search for groups related to 'student'"
 - "Give jane.smith admin privileges on the project:alpha group"
 - "Find all subjects matching the name 'anderson'"
+- "Show me all groups that john.doe is a member of with 'authorized' in the name"
+- "Get all memberships for jane.smith filtered by 'admin'"
 
 ## Technology Stack
 
