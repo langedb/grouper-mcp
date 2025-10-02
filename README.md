@@ -83,36 +83,49 @@ Replace `/path/to/grouper-mcp` with the actual path to this directory.
   - Parameters: `groupName`
 
 - **`find_groups`**: Search for groups
-  - Parameters: `queryFilter`
+  - Parameters: `queryFilter`, `pageNumber` (optional), `pageSize` (optional)
 
 - **`get_group_members`**: Get all members of a group
+  - Parameters: `groupName`, `pageNumber` (optional), `pageSize` (optional)
+
+- **`get_group_member_count`**: Get the total number of members in a group
   - Parameters: `groupName`
 
 ### Member Operations
 
 - **`add_group_member`**: Add a member to a group
-  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (default: "ldap")
+  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (optional)
 
 - **`delete_group_member`**: Remove a member from a group
-  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (default: "ldap")
+  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (optional)
+
+- **`get_subject_memberships`**: Get all group memberships for a subject with optional filtering
+  - Parameters: `subjectId`, `subjectSourceId` (optional), `groupNameFilter` (optional), `pageNumber` (optional), `pageSize` (optional)
+  - The `groupNameFilter` parameter allows filtering by substring in group name (case-insensitive)
+
+- **`has_member`**: Check if a subject is a member of a group
+  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (optional)
+
+- **`trace_membership`**: Trace a subject's membership path to a group
+  - Parameters: `groupName`, `subjectId`, `subjectSourceId` (optional)
 
 ### Privilege Operations
 
 - **`assign_privilege`**: Assign a privilege to a subject on a group
-  - Parameters: `groupName`, `subjectId`, `privilegeName` (e.g., "read", "admin", "update", "view", "optin", "optout"), `subjectSourceId` (default: "ldap")
+  - Parameters: `groupName`, `subjectId`, `privilegeName` (e.g., "read", "admin", "update", "view", "optin", "optout"), `subjectSourceId` (optional)
 
 - **`get_group_privileges`**: Get privileges for a group
-  - Parameters: `groupName`
+  - Parameters: `groupName`, `pageNumber` (optional), `pageSize` (optional)
 
 ### Subject Operations
 
 - **`get_subjects`**: Search for subjects (users)
-  - Parameters: `searchString`
+  - Parameters: `searchString`, `pageNumber` (optional), `pageSize` (optional)
 
 ### Attribute Operations
 
 - **`find_attribute_def_names`**: Find attribute definition names
-  - Parameters: `queryFilter`
+  - Parameters: `queryFilter`, `pageNumber` (optional), `pageSize` (optional)
 
 ## Example Prompts
 
@@ -124,6 +137,21 @@ Once configured with Claude Desktop, you can use natural language prompts like:
 - "Create a new group called institution:projects:newproject with description 'New project team'"
 - "What privileges does user jane.smith have on the group institution:finance:team?"
 - "Find subjects matching 'smith'"
+- "Show me all groups that john.doe is a member of with 'authorized' in the name"
+- "Get all memberships for jane.smith filtered by 'admin'"
+- "Is user bob.jones a member of the IT:staff group?"
+
+## Testing
+
+Run the test suite:
+```bash
+npm test
+```
+
+Test authentication with your Grouper instance:
+```bash
+node test-auth.js
+```
 
 ## Security Notes
 
