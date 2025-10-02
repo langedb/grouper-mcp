@@ -14,7 +14,18 @@ const {
   grouperRequest,
   handleFindGroups,
   handleGetGroupMembers,
-  handleGetSubjectMemberships
+  handleGetSubjectMemberships,
+  handleAddGroupMember,
+  handleDeleteGroupMember,
+  handleGetGroupMemberCount,
+  handleCreateGroup,
+  handleDeleteGroup,
+  handleAssignPrivilege,
+  handleGetGroupPrivileges,
+  handleFindAttributeDefNames,
+  handleGetSubjects,
+  handleHasMember,
+  handleTraceMembership
 } = await import('../index.js');
 
 describe('Grouper MCP Server Integration Tests', () => {
@@ -367,6 +378,406 @@ describe('Grouper MCP Server Integration Tests', () => {
     // Should NOT include a suggestion since filter is already applied
     expect(responseData.suggestion).toBeUndefined();
     expect(responseData.filterApplied).toBe('group');
+  });
+
+  // Member Operations Tests
+  it('should successfully add a group member', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsAddMemberResults: {
+          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
+        }
+      })),
+    });
+
+    const response = await handleAddGroupMember({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.status).toBe('success');
+    expect(responseData.message).toContain('testuser');
+    expect(responseData.message).toContain('test:group');
+  });
+
+  it('should successfully delete a group member', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsDeleteMemberResults: {
+          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
+        }
+      })),
+    });
+
+    const response = await handleDeleteGroupMember({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.status).toBe('success');
+    expect(responseData.message).toContain('Removed');
+  });
+
+  it('should get group member count', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembersResults: {
+          results: [{
+            wsGroup: { name: 'test:testgroup' },
+            wsSubjects: [
+              { id: 'user1' },
+              { id: 'user2' },
+              { id: 'user3' },
+            ],
+          }],
+        },
+      })),
+    });
+
+    const response = await handleGetGroupMemberCount({ groupName: 'test:testgroup' });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.group).toBe('test:testgroup');
+    expect(responseData.memberCount).toBe(3);
+  });
+
+  // Group Operations Tests
+  it('should successfully create a group', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGroupSaveResults: {
+          results: [{
+            wsGroup: {
+              name: 'test:newgroup',
+              displayName: 'Test:New Group',
+              description: 'A new test group',
+            }
+          }]
+        }
+      })),
+    });
+
+    const response = await handleCreateGroup({
+      groupName: 'test:newgroup',
+      displayExtension: 'New Group',
+      description: 'A new test group',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.status).toBe('success');
+    expect(responseData.group.name).toBe('test:newgroup');
+  });
+
+  it('should successfully delete a group', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGroupDeleteResults: {
+          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
+        }
+      })),
+    });
+
+    const response = await handleDeleteGroup({ groupName: 'test:oldgroup' });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.status).toBe('success');
+    expect(responseData.message).toContain('deleted');
+  });
+
+  // Privilege Operations Tests
+  it('should successfully assign a privilege', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsAssignGrouperPrivilegesLiteResult: {
+          resultMetadata: { resultCode: 'SUCCESS' }
+        }
+      })),
+    });
+
+    const response = await handleAssignPrivilege({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+      privilegeName: 'admin',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.status).toBe('success');
+    expect(responseData.message).toContain('admin');
+  });
+
+  it('should get group privileges', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetGrouperPrivilegesLiteResult: {
+          wsGroup: { name: 'test:group' },
+          privilegeResults: [
+            { wsSubject: { id: 'user1' }, privilegeName: 'read', allowed: 'T' },
+            { wsSubject: { id: 'user2' }, privilegeName: 'admin', allowed: 'T' },
+          ]
+        }
+      })),
+    });
+
+    const response = await handleGetGroupPrivileges({ groupName: 'test:group' });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.group).toBe('test:group');
+    expect(responseData.privileges).toBeInstanceOf(Array);
+    expect(responseData.privileges.length).toBe(2);
+    expect(responseData.privileges[0].privilegeName).toBe('read');
+  });
+
+  // Search Operations Tests
+  it('should find attribute def names', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsFindAttributeDefNamesResults: {
+          attributeDefNameResults: [
+            { name: 'attr:def1', description: 'Attribute 1' },
+            { name: 'attr:def2', description: 'Attribute 2' },
+          ]
+        }
+      })),
+    });
+
+    const response = await handleFindAttributeDefNames({ queryFilter: 'attr' });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.attributeDefNames).toBeInstanceOf(Array);
+    expect(responseData.attributeDefNames.length).toBe(2);
+    expect(responseData.attributeDefNames[0].name).toBe('attr:def1');
+  });
+
+  it('should get subjects by search string', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetSubjectsResults: {
+          wsSubjects: [
+            { id: 'jsmith', name: 'John Smith', description: 'Staff', sourceId: 'ldap' },
+            { id: 'jdoe', name: 'Jane Doe', description: 'Faculty', sourceId: 'ldap' },
+          ]
+        }
+      })),
+    });
+
+    const response = await handleGetSubjects({ searchString: 'smith' });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.subjects).toBeInstanceOf(Array);
+    expect(responseData.subjects.length).toBe(2);
+    expect(responseData.subjects[0].name).toBe('John Smith');
+  });
+
+  // Membership Checking Tests
+  it('should check if subject has membership (positive)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsHasMemberResults: {
+          results: [{
+            wsSubject: { id: 'testuser', name: 'Test User', sourceId: 'ldap' },
+            resultMetadata: { resultCode: 'IS_MEMBER' }
+          }],
+          wsGroup: { name: 'test:group' }
+        }
+      })),
+    });
+
+    const response = await handleHasMember({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.group).toBe('test:group');
+    expect(responseData.subject).toBe('testuser');
+    expect(responseData.isMember).toBe(true);
+  });
+
+  it('should check if subject has membership (negative)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsHasMemberResults: {
+          results: [{
+            wsSubject: { id: 'testuser' },
+            resultMetadata: { resultCode: 'IS_NOT_MEMBER' }
+          }],
+          wsGroup: { name: 'test:group' }
+        }
+      })),
+    });
+
+    const response = await handleHasMember({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.isMember).toBe(false);
+  });
+
+  it('should trace direct membership', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'immediate',
+            groupName: 'test:group',
+          }],
+          wsGroups: [{
+            name: 'test:group',
+            displayName: 'Test Group',
+            description: 'A test group',
+            detail: { hasComposite: 'F' }
+          }],
+          wsSubjects: [{
+            id: 'testuser',
+            name: 'Test User',
+            sourceId: 'ldap'
+          }]
+        }
+      })),
+    });
+
+    const response = await handleTraceMembership({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.subject.id).toBe('testuser');
+    expect(responseData.targetGroup.name).toBe('test:group');
+    expect(responseData.membershipType).toBe('immediate');
+    expect(responseData.paths).toBeInstanceOf(Array);
+    expect(responseData.paths[0].type).toBe('direct');
+  });
+
+  it('should trace composite membership', async () => {
+    // First call - get membership with composite details
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'composite',
+            groupName: 'test:authorized',
+          }],
+          wsGroups: [{
+            name: 'test:authorized',
+            displayName: 'Authorized Users',
+            description: 'Authorized users',
+            detail: {
+              hasComposite: 'T',
+              compositeType: 'complement',
+              leftGroup: {
+                name: 'test:eligible',
+                displayName: 'Eligible Users',
+                description: 'Eligible users'
+              },
+              rightGroup: {
+                name: 'test:unauthorized',
+                displayName: 'Unauthorized Users',
+                description: 'Blocked users'
+              }
+            }
+          }],
+          wsSubjects: [{
+            id: 'testuser',
+            name: 'Test User',
+            sourceId: 'ldap'
+          }]
+        }
+      })),
+    });
+
+    // Second call - get all memberships to check composite factors
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [
+            { groupName: 'test:eligible', membershipType: 'immediate' },
+            { groupName: 'other:group', membershipType: 'immediate' },
+          ]
+        }
+      })),
+    });
+
+    const response = await handleTraceMembership({
+      groupName: 'test:authorized',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.membershipType).toBe('composite');
+    expect(responseData.paths).toBeInstanceOf(Array);
+    expect(responseData.paths[0].type).toBe('composite_complement');
+    expect(responseData.paths[0].leftGroup.name).toBe('test:eligible');
+    expect(responseData.paths[0].rightGroup.name).toBe('test:unauthorized');
+  });
+
+  it('should handle non-existent membership in trace', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [],
+          wsGroups: [],
+          wsSubjects: []
+        }
+      })),
+    });
+
+    const response = await handleTraceMembership({
+      groupName: 'test:group',
+      subjectId: 'testuser',
+    });
+
+    expect(response.isError).toBeUndefined();
+    const responseData = JSON.parse(response.content[0].text);
+    expect(responseData.isMember).toBe(false);
+    expect(responseData.message).toContain('not a member');
   });
 
 });
