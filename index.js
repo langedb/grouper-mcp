@@ -602,32 +602,194 @@ export async function handleTraceMembership(args) {
   if (subjectSourceId) {
     subjectLookup.subjectSourceId = subjectSourceId;
   }
-  const result = await grouperRequest(
-    '/web/servicesRest/v4_0_120/memberships',
-    'POST',
-    {
-      WsRestGetMembershipsRequest: {
-        wsSubjectLookups: [subjectLookup],
-        wsMembershipFilter: 'All',
-        includeGroupDetail: 'T',
-        includeSubjectDetail: 'T',
-      },
+
+  try {
+    // Get all memberships for the subject
+    const membershipResult = await grouperRequest(
+      '/web/servicesRest/v4_0_120/memberships',
+      'POST',
+      {
+        WsRestGetMembershipsRequest: {
+          wsSubjectLookups: [subjectLookup],
+          wsGroupLookups: [{ groupName }],
+          wsMembershipFilter: 'All',
+          includeGroupDetail: 'T',
+          includeSubjectDetail: 'T',
+        },
+      }
+    );
+
+    const membership = membershipResult.WsGetMembershipsResults?.wsMemberships?.[0];
+    const groupDetail = membershipResult.WsGetMembershipsResults?.wsGroups?.[0];
+    const subject = membershipResult.WsGetMembershipsResults?.wsSubjects?.[0];
+
+    if (!membership) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            subject: subjectId,
+            group: groupName,
+            isMember: false,
+            message: 'Subject is not a member of this group',
+          }, null, 2),
+        }],
+      };
     }
-  );
 
-  const memberships = result.WsGetMembershipsResults?.results?.[0]?.wsMemberships || [];
-  const targetMembership = memberships.find(m => m.wsGroup.name === groupName);
+    // Build the trace path
+    const trace = {
+      subject: {
+        id: subject?.id || subjectId,
+        name: subject?.name || subjectId,
+        sourceId: subject?.sourceId || subjectSourceId,
+      },
+      targetGroup: {
+        name: groupName,
+        displayName: groupDetail?.displayName || groupName,
+        description: groupDetail?.description,
+      },
+      membershipType: membership.membershipType,
+      paths: [],
+    };
 
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        subject: subjectId,
-        group: groupName,
-        isMember: !!targetMembership,
-      }),
-    }],
-  };
+    // If it's a direct membership
+    if (membership.membershipType === 'immediate') {
+      trace.paths.push({
+        type: 'direct',
+        description: `${trace.subject.name} is a direct member of ${trace.targetGroup.displayName}`,
+      });
+    }
+    // If it's a composite membership
+    else if (membership.membershipType === 'composite' && groupDetail?.detail?.hasComposite === 'T') {
+      const compositeDetail = groupDetail.detail;
+      const compositeType = compositeDetail.compositeType;
+      const leftGroup = compositeDetail.leftGroup;
+      const rightGroup = compositeDetail.rightGroup;
+
+      // Get all subject memberships to determine the path
+      const allMemberships = await grouperRequest(
+        '/web/servicesRest/v4_0_120/memberships',
+        'POST',
+        {
+          WsRestGetMembershipsRequest: {
+            wsSubjectLookups: [subjectLookup],
+            wsMembershipFilter: 'All',
+            includeGroupDetail: 'F',
+            includeSubjectDetail: 'F',
+          },
+        }
+      );
+
+      const allMembershipsList = allMemberships.WsGetMembershipsResults?.wsMemberships || [];
+      const isInLeft = allMembershipsList.some(m => m.groupName === leftGroup.name);
+      const isInRight = allMembershipsList.some(m => m.groupName === rightGroup.name);
+
+      let pathDescription = [];
+
+      if (compositeType === 'complement') {
+        // Left minus right
+        pathDescription.push({
+          type: 'composite_complement',
+          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} MINUS ${rightGroup.displayName})`,
+          inLeftGroup: isInLeft,
+          inRightGroup: isInRight,
+          leftGroup: {
+            name: leftGroup.name,
+            displayName: leftGroup.displayName,
+            description: leftGroup.description,
+          },
+          rightGroup: {
+            name: rightGroup.name,
+            displayName: rightGroup.displayName,
+            description: rightGroup.description,
+          },
+        });
+
+        // Check the membership type in the left group
+        if (isInLeft) {
+          const leftMembership = allMembershipsList.find(m => m.groupName === leftGroup.name);
+          if (leftMembership) {
+            // If it's an effective membership, describe it
+            if (leftMembership.membershipType === 'effective') {
+              // Find groups that contain "affiliations" in their name as likely candidates
+              const likelyIntermediateGroups = allMembershipsList
+                .filter(m => m.membershipType === 'immediate')
+                .filter(m => m.groupName.includes('affiliations') || m.groupName.includes('Reference'))
+                .slice(0, 3);
+
+              pathDescription.push({
+                type: 'effective',
+                description: `${trace.subject.name} is effectively in ${leftGroup.displayName} through group membership`,
+                groupName: leftGroup.name,
+                membershipType: 'effective',
+                note: 'The subject is a member through one or more intermediate groups',
+                likelyPaths: likelyIntermediateGroups.length > 0 ?
+                  likelyIntermediateGroups.map(m => `${trace.subject.name} is a direct member of ${m.groupName}`) :
+                  undefined,
+              });
+            } else {
+              pathDescription.push({
+                type: leftMembership.membershipType,
+                description: `${trace.subject.name} is a direct member of ${leftGroup.displayName}`,
+                groupName: leftGroup.name,
+                membershipType: leftMembership.membershipType,
+              });
+            }
+          }
+        }
+      } else if (compositeType === 'intersection') {
+        // Left AND right
+        pathDescription.push({
+          type: 'composite_intersection',
+          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} AND ${rightGroup.displayName})`,
+          inLeftGroup: isInLeft,
+          inRightGroup: isInRight,
+          leftGroup: {
+            name: leftGroup.name,
+            displayName: leftGroup.displayName,
+          },
+          rightGroup: {
+            name: rightGroup.name,
+            displayName: rightGroup.displayName,
+          },
+        });
+      } else if (compositeType === 'union') {
+        // Left OR right
+        pathDescription.push({
+          type: 'composite_union',
+          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} OR ${rightGroup.displayName})`,
+          inLeftGroup: isInLeft,
+          inRightGroup: isInRight,
+        });
+      }
+
+      trace.paths = pathDescription;
+    }
+    // If it's an effective membership (member of a group that's a member of this group)
+    else if (membership.membershipType === 'effective') {
+      trace.paths.push({
+        type: 'effective',
+        description: `${trace.subject.name} is an effective member (member through another group)`,
+        note: 'Member through group hierarchy - use get_subject_memberships to find intermediate groups',
+      });
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(trace, null, 2),
+      }],
+    };
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Error tracing membership: ${error.message}`,
+      }],
+      isError: true,
+    };
+  }
 }
 
 export async function handleRestartServer(args) {
@@ -996,7 +1158,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'trace_membership',
-        description: 'Trace a subject\'s membership path to a group',
+        description: 'Trace how a subject is a member of a group, showing membership type (direct, effective, composite) and the path through intermediate groups or composite operations',
         inputSchema: {
           type: 'object',
           properties: {
