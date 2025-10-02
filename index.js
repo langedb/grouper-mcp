@@ -582,14 +582,17 @@ export async function handleHasMember(args) {
       },
     }
   );
-  const memberResult = result.WsHasMemberResults?.results[0];
+  const memberResult = result.WsHasMemberResults?.results?.[0];
+  const wsGroup = result.WsHasMemberResults?.wsGroup;
+  const wsSubject = memberResult?.wsSubject;
   const isMember = memberResult?.resultMetadata?.resultCode === 'IS_MEMBER';
+
   return {
     content: [{
       type: 'text',
       text: JSON.stringify({
-        group: memberResult?.wsGroup.name,
-        subject: memberResult?.wsSubject.id,
+        group: wsGroup?.name || groupName,
+        subject: wsSubject?.id || subjectId,
         isMember: isMember,
       }),
     }],
