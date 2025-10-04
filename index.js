@@ -260,7 +260,7 @@ export async function handleGetGroupMembers(args) {
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(response, null, 2),
+        text: JSON.stringify(response),
       }],
     };
   } catch (error) {
@@ -341,7 +341,7 @@ export async function handleFindGroups(args) {
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(response, null, 2),
+        text: JSON.stringify(response),
       }],
     };
   } catch (error) {
@@ -461,7 +461,7 @@ export async function handleGetGroupPrivileges(args) {
   const chunked = chunkResults(simplifiedPrivileges, pageNumber, pageSize, 'privileges');
 
   const response = {
-    group: result.WsGetGrouperPrivilegesLiteResult?.wsGroup.name,
+    group: privileges[0]?.wsGroup?.name || groupName,
     totalPrivileges: chunked.totalItems,
     privilegeCount: chunked.items.length,
     privileges: chunked.items,
@@ -475,7 +475,7 @@ export async function handleGetGroupPrivileges(args) {
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify(response, null, 2),
+      text: JSON.stringify(response),
     }],
   };
 }
@@ -518,20 +518,20 @@ export async function handleFindAttributeDefNames(args) {
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify(response, null, 2),
+      text: JSON.stringify(response),
     }],
   };
 }
 
 export async function handleGetSubjects(args) {
-  const { searchString, pageNumber, pageSize } = args;
+  const { searchString, pageNumber, pageSize, includeSubjectDetail } = args;
   const result = await grouperRequest(
     '/web/servicesRest/v4_0_280/subjects',
     'POST',
     {
       WsRestGetSubjectsRequest: {
         searchString,
-        includeSubjectDetail: 'T',
+        includeSubjectDetail: includeSubjectDetail === false ? 'F' : 'T',
       },
     }
   );
@@ -560,7 +560,7 @@ export async function handleGetSubjects(args) {
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify(response, null, 2),
+      text: JSON.stringify(response),
     }],
   };
 }
@@ -635,7 +635,7 @@ export async function handleTraceMembership(args) {
             group: groupName,
             isMember: false,
             message: 'Subject is not a member of this group',
-          }, null, 2),
+          }),
         }],
       };
     }
@@ -781,7 +781,7 @@ export async function handleTraceMembership(args) {
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(trace, null, 2),
+        text: JSON.stringify(trace),
       }],
     };
   } catch (error) {
@@ -873,7 +873,7 @@ export async function handleGetSubjectMemberships(args) {
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(response, null, 2),
+        text: JSON.stringify(response),
       }],
     };
   } catch (error) {
@@ -1124,6 +1124,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             searchString: {
               type: 'string',
               description: 'Search string for finding subjects',
+            },
+            includeSubjectDetail: {
+              type: 'boolean',
+              description: 'Whether to include detailed subject attributes (name, description, etc.). Set to false for token efficiency when only IDs are needed. Default: true.',
             },
             pageNumber: {
               type: 'string',
