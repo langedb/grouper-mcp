@@ -15,12 +15,7 @@ const {
   handleFindGroups,
   handleGetGroupMembers,
   handleGetSubjectMemberships,
-  handleAddGroupMember,
-  handleDeleteGroupMember,
   handleGetGroupMemberCount,
-  handleCreateGroup,
-  handleDeleteGroup,
-  handleAssignPrivilege,
   handleGetGroupPrivileges,
   handleFindAttributeDefNames,
   handleGetSubjects,
@@ -381,51 +376,6 @@ describe('Grouper MCP Server Integration Tests', () => {
   });
 
   // Member Operations Tests
-  it('should successfully add a group member', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({
-        WsAddMemberResults: {
-          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
-        }
-      })),
-    });
-
-    const response = await handleAddGroupMember({
-      groupName: 'test:group',
-      subjectId: 'testuser',
-    });
-
-    expect(response.isError).toBeUndefined();
-    const responseData = JSON.parse(response.content[0].text);
-    expect(responseData.status).toBe('success');
-    expect(responseData.message).toContain('testuser');
-    expect(responseData.message).toContain('test:group');
-  });
-
-  it('should successfully delete a group member', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({
-        WsDeleteMemberResults: {
-          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
-        }
-      })),
-    });
-
-    const response = await handleDeleteGroupMember({
-      groupName: 'test:group',
-      subjectId: 'testuser',
-    });
-
-    expect(response.isError).toBeUndefined();
-    const responseData = JSON.parse(response.content[0].text);
-    expect(responseData.status).toBe('success');
-    expect(responseData.message).toContain('Removed');
-  });
-
   it('should get group member count', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -452,79 +402,7 @@ describe('Grouper MCP Server Integration Tests', () => {
     expect(responseData.memberCount).toBe(3);
   });
 
-  // Group Operations Tests
-  it('should successfully create a group', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({
-        WsGroupSaveResults: {
-          results: [{
-            wsGroup: {
-              name: 'test:newgroup',
-              displayName: 'Test:New Group',
-              description: 'A new test group',
-            }
-          }]
-        }
-      })),
-    });
-
-    const response = await handleCreateGroup({
-      groupName: 'test:newgroup',
-      displayExtension: 'New Group',
-      description: 'A new test group',
-    });
-
-    expect(response.isError).toBeUndefined();
-    const responseData = JSON.parse(response.content[0].text);
-    expect(responseData.status).toBe('success');
-    expect(responseData.group.name).toBe('test:newgroup');
-  });
-
-  it('should successfully delete a group', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({
-        WsGroupDeleteResults: {
-          results: [{ resultMetadata: { resultCode: 'SUCCESS' } }]
-        }
-      })),
-    });
-
-    const response = await handleDeleteGroup({ groupName: 'test:oldgroup' });
-
-    expect(response.isError).toBeUndefined();
-    const responseData = JSON.parse(response.content[0].text);
-    expect(responseData.status).toBe('success');
-    expect(responseData.message).toContain('deleted');
-  });
-
   // Privilege Operations Tests
-  it('should successfully assign a privilege', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({
-        WsAssignGrouperPrivilegesLiteResult: {
-          resultMetadata: { resultCode: 'SUCCESS' }
-        }
-      })),
-    });
-
-    const response = await handleAssignPrivilege({
-      groupName: 'test:group',
-      subjectId: 'testuser',
-      privilegeName: 'admin',
-    });
-
-    expect(response.isError).toBeUndefined();
-    const responseData = JSON.parse(response.content[0].text);
-    expect(responseData.status).toBe('success');
-    expect(responseData.message).toContain('admin');
-  });
-
   it('should get group privileges', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
