@@ -161,60 +161,6 @@ export async function grouperRequest(endpoint, method = 'GET', body = null) {
 }
 
 // Exported tool handler functions
-export async function handleAddGroupMember(args) {
-  const { groupName, subjectId, subjectSourceId } = args;
-  const subjectLookup = { subjectId };
-  if (subjectSourceId) {
-    subjectLookup.subjectSourceId = subjectSourceId;
-  }
-  await grouperRequest(
-    '/web/servicesRest/v4_0_020/groups',
-    'POST',
-    {
-      WsRestAddMemberRequest: {
-        wsGroupLookup: { groupName },
-        subjectLookups: [subjectLookup],
-      },
-    }
-  );
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        status: 'success',
-        message: `Added subject '${subjectId}' to group '${groupName}'.`,
-      }),
-    }],
-  };
-}
-
-export async function handleDeleteGroupMember(args) {
-  const { groupName, subjectId, subjectSourceId } = args;
-  const subjectLookup = { subjectId };
-  if (subjectSourceId) {
-    subjectLookup.subjectSourceId = subjectSourceId;
-  }
-  await grouperRequest(
-    '/web/servicesRest/v4_0_220/groups',
-    'POST',
-    {
-      WsRestDeleteMemberRequest: {
-        wsGroupLookup: { groupName },
-        subjectLookups: [subjectLookup],
-      },
-    }
-  );
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        status: 'success',
-        message: `Removed subject '${subjectId}' from group '${groupName}'.`,
-      }),
-    }],
-  };
-}
-
 export async function handleGetGroupMembers(args) {
   try {
     const { groupName, pageNumber, pageSize } = args;
@@ -353,87 +299,6 @@ export async function handleFindGroups(args) {
       isError: true,
     };
   }
-}
-
-export async function handleCreateGroup(args) {
-  const { groupName, displayExtension, description } = args;
-  const result = await grouperRequest(
-    '/web/servicesRest/v4_0_050/groups',
-    'POST',
-    {
-      WsRestGroupSaveRequest: {
-        wsGroupToSaves: [{
-          wsGroup: {
-            name: groupName,
-            displayExtension: displayExtension || groupName.split(':').pop(),
-            description: description || '',
-          },
-        }],
-      },
-    }
-  );
-  const savedGroup = result.WsGroupSaveResults?.results[0]?.wsGroup;
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        status: 'success',
-        group: {
-          name: savedGroup.name,
-          displayName: savedGroup.displayName,
-          description: savedGroup.description,
-        },
-      }),
-    }],
-  };
-}
-
-export async function handleDeleteGroup(args) {
-  const { groupName } = args;
-  await grouperRequest(
-    '/web/servicesRest/v4_0_060/groups',
-    'POST',
-    {
-      WsRestGroupDeleteRequest: {
-        wsGroupLookups: [{ groupName }],
-      },
-    }
-  );
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        status: 'success',
-        message: `Group '${groupName}' deleted.`,
-      }),
-    }],
-  };
-}
-
-export async function handleAssignPrivilege(args) {
-  const { groupName, subjectId, privilegeName, subjectSourceId } = args;
-  const requestBody = {
-    WsRestAssignGrouperPrivilegesLiteRequest: {
-      groupName,
-      subjectId,
-      privilegeName,
-      privilegeType: 'access',
-      allowed: 'T',
-    },
-  };
-  if (subjectSourceId) {
-    requestBody.WsRestAssignGrouperPrivilegesLiteRequest.subjectSourceId = subjectSourceId;
-  }
-  await grouperRequest('/web/servicesRest/v4_0_100/grouperPrivileges', 'POST', requestBody);
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        status: 'success',
-        message: `Assigned privilege '${privilegeName}' to subject '${subjectId}' on group '${groupName}'.`,
-      }),
-    }],
-  };
 }
 
 export async function handleGetGroupPrivileges(args) {
@@ -906,51 +771,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'add_group_member',
-        description: 'Add a member to a Grouper group',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            groupName: {
-              type: 'string',
-              description: 'The name of the group (e.g., "institution:department:groupname")',
-            },
-            subjectId: {
-              type: 'string',
-              description: 'The subject ID to add (e.g., username or ID)',
-            },
-            subjectSourceId: {
-              type: 'string',
-              description: 'The source of the subject (e.g., "ldap", "jdbc", "ucmcdb"). If not specified, Grouper will use its default subject source.',
-            },
-          },
-          required: ['groupName', 'subjectId'],
-        },
-      },
-      {
-        name: 'delete_group_member',
-        description: 'Remove a member from a Grouper group',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            groupName: {
-              type: 'string',
-              description: 'The name of the group',
-            },
-            subjectId: {
-              type: 'string',
-              description: 'The subject ID to remove',
-            },
-            subjectSourceId: {
-              type: 'string',
-              description: 'The source of the subject',
-              default: 'ldap',
-            },
-          },
-          required: ['groupName', 'subjectId'],
-        },
-      },
-      {
         name: 'get_group_members',
         description: 'Get members of a Grouper group. For large groups, use pageNumber and pageSize to retrieve members in chunks.',
         inputSchema: {
@@ -1006,69 +826,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['queryFilter'],
-        },
-      },
-      {
-        name: 'create_group',
-        description: 'Create a new Grouper group',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            groupName: {
-              type: 'string',
-              description: 'The full name of the group to create',
-            },
-            displayExtension: {
-              type: 'string',
-              description: 'Display name for the group',
-            },
-            description: {
-              type: 'string',
-              description: 'Description of the group',
-            },
-          },
-          required: ['groupName'],
-        },
-      },
-      {
-        name: 'delete_group',
-        description: 'Delete a Grouper group',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            groupName: {
-              type: 'string',
-              description: 'The name of the group to delete',
-            },
-          },
-          required: ['groupName'],
-        },
-      },
-      {
-        name: 'assign_privilege',
-        description: 'Assign a privilege to a subject on a group',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            groupName: {
-              type: 'string',
-              description: 'The group name',
-            },
-            subjectId: {
-              type: 'string',
-              description: 'The subject ID',
-            },
-            privilegeName: {
-              type: 'string',
-              description: 'Privilege to assign (e.g., "read", "admin", "update", "view", "optin", "optout")',
-            },
-            subjectSourceId: {
-              type: 'string',
-              description: 'The source of the subject',
-              default: 'ldap',
-            },
-          },
-          required: ['groupName', 'subjectId', 'privilegeName'],
         },
       },
       {
@@ -1237,22 +994,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
-      case 'add_group_member':
-        return handleAddGroupMember(args);
-      case 'delete_group_member':
-        return handleDeleteGroupMember(args);
       case 'get_group_members':
         return handleGetGroupMembers(args);
       case 'get_group_member_count':
         return handleGetGroupMemberCount(args);
       case 'find_groups':
         return handleFindGroups(args);
-      case 'create_group':
-        return handleCreateGroup(args);
-      case 'delete_group':
-        return handleDeleteGroup(args);
-      case 'assign_privilege':
-        return handleAssignPrivilege(args);
       case 'get_group_privileges':
         return handleGetGroupPrivileges(args);
       case 'find_attribute_def_names':
