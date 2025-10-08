@@ -599,6 +599,320 @@ export async function handleHasMember(args) {
   };
 }
 
+/**
+ * Recursively trace membership chain from subject to target group
+ * @param {string} subjectId - The subject ID to trace
+ * @param {string} targetGroupName - The target group name
+ * @param {Object} subjectLookup - The subject lookup object
+ * @param {Set} visited - Set of visited groups to prevent cycles
+ * @param {number} depth - Current recursion depth
+ * @returns {Object|null} - The traced path or null if not a member
+ */
+async function traceMembershipRecursive(subjectId, targetGroupName, subjectLookup, visited = new Set(), depth = 0) {
+  // Prevent infinite loops and limit recursion depth
+  // Reduced from 10 to 5 to prevent timeout issues
+  const MAX_DEPTH = 5;
+  if (depth > MAX_DEPTH) {
+    return {
+      type: 'max_depth_reached',
+      description: `Maximum trace depth (${MAX_DEPTH}) reached - stopping trace to prevent timeout`,
+      targetGroup: targetGroupName,
+    };
+  }
+
+  if (visited.has(targetGroupName)) {
+    return {
+      type: 'cycle_detected',
+      description: `Cycle detected at ${targetGroupName}`,
+      targetGroup: targetGroupName,
+    };
+  }
+
+  visited.add(targetGroupName);
+
+  // Get membership information for this group
+  const membershipResult = await grouperRequest(
+    '/web/servicesRest/v4_0_120/memberships',
+    'POST',
+    {
+      WsRestGetMembershipsRequest: {
+        wsSubjectLookups: [subjectLookup],
+        wsGroupLookups: [{ groupName: targetGroupName }],
+        wsMembershipFilter: 'All',
+        includeGroupDetail: 'T',
+        includeSubjectDetail: 'T',
+      },
+    }
+  );
+
+  const membership = membershipResult.WsGetMembershipsResults?.wsMemberships?.[0];
+  const groupDetail = membershipResult.WsGetMembershipsResults?.wsGroups?.[0];
+  const subject = membershipResult.WsGetMembershipsResults?.wsSubjects?.[0];
+
+  if (!membership) {
+    return null; // Not a member of this group
+  }
+
+  // Base case: immediate (direct) membership
+  if (membership.membershipType === 'immediate') {
+    return {
+      type: 'immediate',
+      groupName: targetGroupName,
+      groupDisplayName: groupDetail?.displayName || targetGroupName,
+      description: `${subject?.name || subjectId} is a direct member of ${groupDetail?.displayName || targetGroupName}`,
+    };
+  }
+
+  // Effective membership: find the intermediate group(s)
+  if (membership.membershipType === 'effective') {
+    console.error(`[TRACE] Depth ${depth}: Tracing effective membership for ${subjectId} in ${targetGroupName}`);
+
+    // Strategy: Find the intersection of (1) groups the subject is immediately in, and (2) groups that are immediately in the target
+    // This requires only 2 API calls instead of N+1 where N is the number of groups the subject is in
+
+    // Call 1: Get immediate memberships for the subject
+    console.error(`[TRACE] Depth ${depth}: Getting immediate memberships for ${subjectId}`);
+    const subjectMembershipsResult = await grouperRequest(
+      '/web/servicesRest/v4_0_120/memberships',
+      'POST',
+      {
+        WsRestGetMembershipsRequest: {
+          wsSubjectLookups: [subjectLookup],
+          wsMembershipFilter: 'Immediate',
+          includeGroupDetail: 'T',
+          includeSubjectDetail: 'F',
+        },
+      }
+    );
+
+    const subjectMemberships = subjectMembershipsResult.WsGetMembershipsResults?.wsMemberships || [];
+    const subjectGroupNames = new Set(subjectMemberships.map(m => m.groupName));
+    console.error(`[TRACE] Depth ${depth}: ${subjectId} is immediately in ${subjectGroupNames.size} groups`);
+
+    // Call 2: Get immediate GROUP members of the target (only groups, not users)
+    console.error(`[TRACE] Depth ${depth}: Getting group members of ${targetGroupName}`);
+    const targetMembersResult = await grouperRequest(
+      '/web/servicesRest/v4_0_030/groups',
+      'POST',
+      {
+        WsRestGetMembersRequest: {
+          wsGroupLookups: [{ groupName: targetGroupName }],
+          includeGroupDetail: 'F',
+          includeSubjectDetail: 'T',
+        },
+      }
+    );
+
+    const targetMembers = targetMembersResult.WsGetMembersResults?.results?.[0]?.wsSubjects || [];
+
+    // Filter to only group members (sourceId = 'g:gsa')
+    const targetGroupMembers = targetMembers.filter(m => m.sourceId === 'g:gsa');
+    console.error(`[TRACE] Depth ${depth}: ${targetGroupName} has ${targetGroupMembers.length} immediate group members (out of ${targetMembers.length} total members)`);
+
+    // Find the intersection: which group is the subject in AND is also in the target?
+    const intermediateGroups = [];
+    for (const targetGroupMember of targetGroupMembers) {
+      if (subjectGroupNames.has(targetGroupMember.name)) {
+        const groupInfo = subjectMembershipsResult.WsGetMembershipsResults?.wsGroups?.find(g => g.name === targetGroupMember.name);
+        intermediateGroups.push({
+          name: targetGroupMember.name,
+          displayName: groupInfo?.displayName || targetGroupMember.name,
+        });
+        console.error(`[TRACE] Depth ${depth}: Found intermediate group: ${targetGroupMember.name}`);
+        // Only trace the first one to keep things efficient
+        break;
+      }
+    }
+
+    if (intermediateGroups.length === 0) {
+      console.error(`[TRACE] Depth ${depth}: No immediate intermediate groups found for ${subjectId} -> ${targetGroupName}`);
+      console.error(`[TRACE] Depth ${depth}: Subject is in: ${Array.from(subjectGroupNames).slice(0, 5).join(', ')}...`);
+      console.error(`[TRACE] Depth ${depth}: Target has group members: ${targetGroupMembers.slice(0, 5).map(m => m.id).join(', ')}...`);
+      return {
+        type: 'effective',
+        groupName: targetGroupName,
+        groupDisplayName: groupDetail?.displayName || targetGroupName,
+        description: `${subject?.name || subjectId} is an effective member of ${groupDetail?.displayName || targetGroupName}`,
+        note: 'Could not determine intermediate group path - membership may be through nested groups beyond immediate level',
+        subjectImmediateGroupCount: subjectGroupNames.size,
+        targetImmediateGroupMemberCount: targetGroupMembers.length,
+      };
+    }
+
+    console.error(`[TRACE] Depth ${depth}: Recursing into intermediate group: ${intermediateGroups[0].name}`);
+    // Recursively trace through the intermediate group
+    const intermediatePath = await traceMembershipRecursive(
+      subjectId,
+      intermediateGroups[0].name,
+      subjectLookup,
+      new Set(visited),
+      depth + 1
+    );
+
+    return {
+      type: 'effective',
+      groupName: targetGroupName,
+      groupDisplayName: groupDetail?.displayName || targetGroupName,
+      description: `${subject?.name || subjectId} is an effective member of ${groupDetail?.displayName || targetGroupName} via ${intermediateGroups[0].displayName}`,
+      intermediateGroup: intermediateGroups[0],
+      chain: intermediatePath,
+    };
+  }
+
+  // Composite membership
+  if (membership.membershipType === 'composite' && groupDetail?.detail?.hasComposite === 'T') {
+    const compositeDetail = groupDetail.detail;
+    const compositeType = compositeDetail.compositeType;
+    const leftGroup = compositeDetail.leftGroup;
+    const rightGroup = compositeDetail.rightGroup;
+
+    // Get all subject memberships to determine the path
+    const allMemberships = await grouperRequest(
+      '/web/servicesRest/v4_0_120/memberships',
+      'POST',
+      {
+        WsRestGetMembershipsRequest: {
+          wsSubjectLookups: [subjectLookup],
+          wsMembershipFilter: 'All',
+          includeGroupDetail: 'F',
+          includeSubjectDetail: 'F',
+        },
+      }
+    );
+
+    const allMembershipsList = allMemberships.WsGetMembershipsResults?.wsMemberships || [];
+    const isInLeft = allMembershipsList.some(m => m.groupName === leftGroup.name);
+    const isInRight = allMembershipsList.some(m => m.groupName === rightGroup.name);
+
+    const result = {
+      type: 'composite',
+      groupName: targetGroupName,
+      groupDisplayName: groupDetail?.displayName || targetGroupName,
+      compositeType: compositeType,
+      leftGroup: {
+        name: leftGroup.name,
+        displayName: leftGroup.displayName,
+        isMember: isInLeft,
+      },
+      rightGroup: {
+        name: rightGroup.name,
+        displayName: rightGroup.displayName,
+        isMember: isInRight,
+      },
+    };
+
+    // Recursively trace the left group if the subject is a member
+    if (isInLeft) {
+      result.leftGroup.chain = await traceMembershipRecursive(
+        subjectId,
+        leftGroup.name,
+        subjectLookup,
+        new Set(visited),
+        depth + 1
+      );
+    }
+
+    // For intersection, also trace the right group
+    if (compositeType === 'intersection' && isInRight) {
+      result.rightGroup.chain = await traceMembershipRecursive(
+        subjectId,
+        rightGroup.name,
+        subjectLookup,
+        new Set(visited),
+        depth + 1
+      );
+    }
+
+    return result;
+  }
+
+  return {
+    type: membership.membershipType,
+    groupName: targetGroupName,
+    groupDisplayName: groupDetail?.displayName || targetGroupName,
+    description: `${subject?.name || subjectId} has membership type '${membership.membershipType}' in ${groupDetail?.displayName || targetGroupName}`,
+  };
+}
+
+/**
+ * Convert recursive trace structure into a flat path array
+ * @param {Object} traceNode - The recursive trace node
+ * @returns {Array} - Array of groups in the membership path
+ */
+function flattenTracePath(traceNode) {
+  if (!traceNode) {
+    return [];
+  }
+
+  const path = [];
+
+  // Handle immediate membership
+  if (traceNode.type === 'immediate') {
+    path.push({
+      groupName: traceNode.groupName,
+      groupDisplayName: traceNode.groupDisplayName,
+      membershipType: 'immediate',
+      description: traceNode.description,
+    });
+    return path;
+  }
+
+  // Handle effective membership - follow the chain
+  if (traceNode.type === 'effective' && traceNode.chain) {
+    // Recursively flatten the chain
+    const chainPath = flattenTracePath(traceNode.chain);
+    // Add all intermediate groups to the path
+    path.push(...chainPath);
+    // Add the current group
+    path.push({
+      groupName: traceNode.groupName,
+      groupDisplayName: traceNode.groupDisplayName,
+      membershipType: 'effective',
+      description: traceNode.description,
+      viaGroup: traceNode.intermediateGroup?.name,
+    });
+    return path;
+  }
+
+  // Handle composite membership
+  if (traceNode.type === 'composite') {
+    const compositeInfo = {
+      groupName: traceNode.groupName,
+      groupDisplayName: traceNode.groupDisplayName,
+      membershipType: 'composite',
+      compositeType: traceNode.compositeType,
+      leftGroup: traceNode.leftGroup.name,
+      rightGroup: traceNode.rightGroup.name,
+    };
+
+    // If there's a chain through the left group, add it
+    if (traceNode.leftGroup.chain) {
+      const leftPath = flattenTracePath(traceNode.leftGroup.chain);
+      path.push(...leftPath);
+      compositeInfo.pathThroughLeftGroup = true;
+    }
+
+    // If there's a chain through the right group (for intersections), add it
+    if (traceNode.rightGroup.chain) {
+      const rightPath = flattenTracePath(traceNode.rightGroup.chain);
+      path.push(...rightPath);
+      compositeInfo.pathThroughRightGroup = true;
+    }
+
+    path.push(compositeInfo);
+    return path;
+  }
+
+  // Handle other cases (max depth, cycle, etc.)
+  path.push({
+    groupName: traceNode.groupName || traceNode.targetGroup,
+    type: traceNode.type,
+    description: traceNode.description,
+  });
+
+  return path;
+}
+
 export async function handleTraceMembership(args) {
   const { groupName, subjectId, subjectSourceId } = args;
   const subjectLookup = { subjectId };
@@ -607,7 +921,7 @@ export async function handleTraceMembership(args) {
   }
 
   try {
-    // Get all memberships for the subject
+    // Get basic membership information
     const membershipResult = await grouperRequest(
       '/web/servicesRest/v4_0_120/memberships',
       'POST',
@@ -640,8 +954,13 @@ export async function handleTraceMembership(args) {
       };
     }
 
-    // Build the trace path
-    const trace = {
+    // Build the recursive trace
+    const recursiveTrace = await traceMembershipRecursive(subjectId, groupName, subjectLookup);
+
+    // Flatten the trace into a path array
+    const membershipPath = flattenTracePath(recursiveTrace);
+
+    const result = {
       subject: {
         id: subject?.id || subjectId,
         name: subject?.name || subjectId,
@@ -653,135 +972,16 @@ export async function handleTraceMembership(args) {
         description: groupDetail?.description,
       },
       membershipType: membership.membershipType,
-      paths: [],
+      membershipPath: membershipPath,
+      pathSummary: membershipPath.length > 0
+        ? `${subject?.name || subjectId} → ${membershipPath.map(p => p.groupDisplayName || p.groupName).join(' → ')}`
+        : 'No path available',
     };
-
-    // If it's a direct membership
-    if (membership.membershipType === 'immediate') {
-      trace.paths.push({
-        type: 'direct',
-        description: `${trace.subject.name} is a direct member of ${trace.targetGroup.displayName}`,
-      });
-    }
-    // If it's a composite membership
-    else if (membership.membershipType === 'composite' && groupDetail?.detail?.hasComposite === 'T') {
-      const compositeDetail = groupDetail.detail;
-      const compositeType = compositeDetail.compositeType;
-      const leftGroup = compositeDetail.leftGroup;
-      const rightGroup = compositeDetail.rightGroup;
-
-      // Get all subject memberships to determine the path
-      const allMemberships = await grouperRequest(
-        '/web/servicesRest/v4_0_120/memberships',
-        'POST',
-        {
-          WsRestGetMembershipsRequest: {
-            wsSubjectLookups: [subjectLookup],
-            wsMembershipFilter: 'All',
-            includeGroupDetail: 'F',
-            includeSubjectDetail: 'F',
-          },
-        }
-      );
-
-      const allMembershipsList = allMemberships.WsGetMembershipsResults?.wsMemberships || [];
-      const isInLeft = allMembershipsList.some(m => m.groupName === leftGroup.name);
-      const isInRight = allMembershipsList.some(m => m.groupName === rightGroup.name);
-
-      let pathDescription = [];
-
-      if (compositeType === 'complement') {
-        // Left minus right
-        pathDescription.push({
-          type: 'composite_complement',
-          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} MINUS ${rightGroup.displayName})`,
-          inLeftGroup: isInLeft,
-          inRightGroup: isInRight,
-          leftGroup: {
-            name: leftGroup.name,
-            displayName: leftGroup.displayName,
-            description: leftGroup.description,
-          },
-          rightGroup: {
-            name: rightGroup.name,
-            displayName: rightGroup.displayName,
-            description: rightGroup.description,
-          },
-        });
-
-        // Check the membership type in the left group
-        if (isInLeft) {
-          const leftMembership = allMembershipsList.find(m => m.groupName === leftGroup.name);
-          if (leftMembership) {
-            // If it's an effective membership, describe it
-            if (leftMembership.membershipType === 'effective') {
-              // Find groups that contain "affiliations" in their name as likely candidates
-              const likelyIntermediateGroups = allMembershipsList
-                .filter(m => m.membershipType === 'immediate')
-                .filter(m => m.groupName.includes('affiliations') || m.groupName.includes('Reference'))
-                .slice(0, 3);
-
-              pathDescription.push({
-                type: 'effective',
-                description: `${trace.subject.name} is effectively in ${leftGroup.displayName} through group membership`,
-                groupName: leftGroup.name,
-                membershipType: 'effective',
-                note: 'The subject is a member through one or more intermediate groups',
-                likelyPaths: likelyIntermediateGroups.length > 0 ?
-                  likelyIntermediateGroups.map(m => `${trace.subject.name} is a direct member of ${m.groupName}`) :
-                  undefined,
-              });
-            } else {
-              pathDescription.push({
-                type: leftMembership.membershipType,
-                description: `${trace.subject.name} is a direct member of ${leftGroup.displayName}`,
-                groupName: leftGroup.name,
-                membershipType: leftMembership.membershipType,
-              });
-            }
-          }
-        }
-      } else if (compositeType === 'intersection') {
-        // Left AND right
-        pathDescription.push({
-          type: 'composite_intersection',
-          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} AND ${rightGroup.displayName})`,
-          inLeftGroup: isInLeft,
-          inRightGroup: isInRight,
-          leftGroup: {
-            name: leftGroup.name,
-            displayName: leftGroup.displayName,
-          },
-          rightGroup: {
-            name: rightGroup.name,
-            displayName: rightGroup.displayName,
-          },
-        });
-      } else if (compositeType === 'union') {
-        // Left OR right
-        pathDescription.push({
-          type: 'composite_union',
-          description: `${trace.subject.name} is a member via composite (${leftGroup.displayName} OR ${rightGroup.displayName})`,
-          inLeftGroup: isInLeft,
-          inRightGroup: isInRight,
-        });
-      }
-
-      trace.paths = pathDescription;
-    }
-    // If it's an effective membership (member of a group that's a member of this group)
-    else if (membership.membershipType === 'effective') {
-      trace.paths.push({
-        type: 'effective',
-        description: `${trace.subject.name} is an effective member (member through another group)`,
-        note: 'Member through group hierarchy - use get_subject_memberships to find intermediate groups',
-      });
-    }
 
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(trace),
+        text: JSON.stringify(result),
       }],
     };
   } catch (error) {
