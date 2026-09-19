@@ -40,6 +40,16 @@ if (!isTestMode) {
 const MAX_RESPONSE_SIZE = 50000;
 const DEFAULT_PAGE_SIZE = 25;
 
+// Verbose per-request logging is opt-in; it echoes full API payloads to stderr,
+// which can include member lists and other subject data.
+const DEBUG = process.env.GROUPER_DEBUG === 'true' || process.env.GROUPER_DEBUG === '1';
+
+function debugLog(...args) {
+  if (DEBUG) {
+    console.error(...args);
+  }
+}
+
 /**
  * Helper function to automatically chunk large result sets
  * @param {Array} items - The full array of items to potentially chunk
@@ -98,15 +108,13 @@ export async function grouperRequest(endpoint, method = 'GET', body = null) {
   const url = `${GROUPER_BASE_URL}${endpoint}`;
   const auth = Buffer.from(`${GROUPER_USERNAME}:${GROUPER_PASSWORD}`).toString('base64');
 
-  console.error('[API] Making request to:', url);
-  console.error('[API] Method:', method);
-  console.error('[API] Username being used:', GROUPER_USERNAME);
-  console.error('[API] Authorization header present:', auth ? 'YES' : 'NO');
-  console.error('[API] Auth string length:', auth.length);
-  console.error('[API] First 20 chars of base64:', auth.substring(0, 20) + '...');
+  debugLog('[API] Making request to:', url);
+  debugLog('[API] Method:', method);
+  debugLog('[API] Username being used:', GROUPER_USERNAME);
+  debugLog('[API] Authorization header present:', auth ? 'YES' : 'NO');
 
   if (body) {
-    console.error('[API] Request body:', JSON.stringify(body, null, 2));
+    debugLog('[API] Request body:', JSON.stringify(body, null, 2));
   }
 
   const options = {
@@ -117,7 +125,7 @@ export async function grouperRequest(endpoint, method = 'GET', body = null) {
     },
   };
 
-  console.error('[API] All headers being sent:', JSON.stringify(options.headers, (key, value) => {
+  debugLog('[API] All headers being sent:', JSON.stringify(options.headers, (key, value) => {
     if (key === 'Authorization') return 'Basic [REDACTED]';
     return value;
   }, 2));
@@ -128,17 +136,17 @@ export async function grouperRequest(endpoint, method = 'GET', body = null) {
 
   try {
     const response = await fetch(url, options);
-    console.error('[API] Response status:', response.status, response.statusText);
+    debugLog('[API] Response status:', response.status, response.statusText);
 
     // Get the response text first to check if it's JSON
     const responseText = await response.text();
-    console.error('[API] Response body (first 500 chars):', responseText.substring(0, 500));
+    debugLog('[API] Response body (first 500 chars):', responseText.substring(0, 500));
 
     // Try to parse as JSON
     let data;
     try {
       data = JSON.parse(responseText);
-      console.error('[API] Response data (parsed JSON):', JSON.stringify(data, null, 2));
+      debugLog('[API] Response data (parsed JSON):', JSON.stringify(data, null, 2));
     } catch (parseError) {
       console.error('[API] Response is not JSON, likely HTML error page');
       if (!response.ok) {
@@ -152,7 +160,7 @@ export async function grouperRequest(endpoint, method = 'GET', body = null) {
       throw new Error(`Grouper API error: ${JSON.stringify(data)}`);
     }
 
-    console.error('[API] Request successful');
+    debugLog('[API] Request successful');
     return data;
   } catch (error) {
     console.error('[API] Error during request:', error.message);
@@ -665,13 +673,13 @@ async function traceMembershipRecursive(subjectId, targetGroupName, subjectLooku
 
   // Effective membership: find the intermediate group(s)
   if (membership.membershipType === 'effective') {
-    console.error(`[TRACE] Depth ${depth}: Tracing effective membership for ${subjectId} in ${targetGroupName}`);
+    debugLog(`[TRACE] Depth ${depth}: Tracing effective membership for ${subjectId} in ${targetGroupName}`);
 
     // Strategy: Find the intersection of (1) groups the subject is immediately in, and (2) groups that are immediately in the target
     // This requires only 2 API calls instead of N+1 where N is the number of groups the subject is in
 
     // Call 1: Get immediate memberships for the subject
-    console.error(`[TRACE] Depth ${depth}: Getting immediate memberships for ${subjectId}`);
+    debugLog(`[TRACE] Depth ${depth}: Getting immediate memberships for ${subjectId}`);
     const subjectMembershipsResult = await grouperRequest(
       '/web/servicesRest/v4_0_120/memberships',
       'POST',
@@ -687,10 +695,10 @@ async function traceMembershipRecursive(subjectId, targetGroupName, subjectLooku
 
     const subjectMemberships = subjectMembershipsResult.WsGetMembershipsResults?.wsMemberships || [];
     const subjectGroupNames = new Set(subjectMemberships.map(m => m.groupName));
-    console.error(`[TRACE] Depth ${depth}: ${subjectId} is immediately in ${subjectGroupNames.size} groups`);
+    debugLog(`[TRACE] Depth ${depth}: ${subjectId} is immediately in ${subjectGroupNames.size} groups`);
 
     // Call 2: Get immediate GROUP members of the target (only groups, not users)
-    console.error(`[TRACE] Depth ${depth}: Getting group members of ${targetGroupName}`);
+    debugLog(`[TRACE] Depth ${depth}: Getting group members of ${targetGroupName}`);
     const targetMembersResult = await grouperRequest(
       '/web/servicesRest/v4_0_030/groups',
       'POST',
@@ -707,7 +715,7 @@ async function traceMembershipRecursive(subjectId, targetGroupName, subjectLooku
 
     // Filter to only group members (sourceId = 'g:gsa')
     const targetGroupMembers = targetMembers.filter(m => m.sourceId === 'g:gsa');
-    console.error(`[TRACE] Depth ${depth}: ${targetGroupName} has ${targetGroupMembers.length} immediate group members (out of ${targetMembers.length} total members)`);
+    debugLog(`[TRACE] Depth ${depth}: ${targetGroupName} has ${targetGroupMembers.length} immediate group members (out of ${targetMembers.length} total members)`);
 
     // Find the intersection: which group is the subject in AND is also in the target?
     const intermediateGroups = [];
@@ -718,16 +726,16 @@ async function traceMembershipRecursive(subjectId, targetGroupName, subjectLooku
           name: targetGroupMember.name,
           displayName: groupInfo?.displayName || targetGroupMember.name,
         });
-        console.error(`[TRACE] Depth ${depth}: Found intermediate group: ${targetGroupMember.name}`);
+        debugLog(`[TRACE] Depth ${depth}: Found intermediate group: ${targetGroupMember.name}`);
         // Only trace the first one to keep things efficient
         break;
       }
     }
 
     if (intermediateGroups.length === 0) {
-      console.error(`[TRACE] Depth ${depth}: No immediate intermediate groups found for ${subjectId} -> ${targetGroupName}`);
-      console.error(`[TRACE] Depth ${depth}: Subject is in: ${Array.from(subjectGroupNames).slice(0, 5).join(', ')}...`);
-      console.error(`[TRACE] Depth ${depth}: Target has group members: ${targetGroupMembers.slice(0, 5).map(m => m.id).join(', ')}...`);
+      debugLog(`[TRACE] Depth ${depth}: No immediate intermediate groups found for ${subjectId} -> ${targetGroupName}`);
+      debugLog(`[TRACE] Depth ${depth}: Subject is in: ${Array.from(subjectGroupNames).slice(0, 5).join(', ')}...`);
+      debugLog(`[TRACE] Depth ${depth}: Target has group members: ${targetGroupMembers.slice(0, 5).map(m => m.id).join(', ')}...`);
       return {
         type: 'effective',
         groupName: targetGroupName,
@@ -739,7 +747,7 @@ async function traceMembershipRecursive(subjectId, targetGroupName, subjectLooku
       };
     }
 
-    console.error(`[TRACE] Depth ${depth}: Recursing into intermediate group: ${intermediateGroups[0].name}`);
+    debugLog(`[TRACE] Depth ${depth}: Recursing into intermediate group: ${intermediateGroups[0].name}`);
     // Recursively trace through the intermediate group
     const intermediatePath = await traceMembershipRecursive(
       subjectId,

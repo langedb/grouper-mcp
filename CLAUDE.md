@@ -29,13 +29,18 @@ This is a **Model Context Protocol (MCP) server** that enables AI assistants lik
 
 ### Available Tools
 
-The server exposes 15 MCP tools for Grouper operations:
+The server exposes 15 MCP tools for Grouper operations. Tools that can return
+large result sets (`find_groups`, `get_group_members`, `get_group_privileges`,
+`get_subjects`, `find_attribute_def_names`, `get_subject_memberships`) accept
+optional `pageNumber` and `pageSize` arguments and auto-paginate once a response
+exceeds ~50KB (see `chunkResults()` in `index.js`).
 
 #### Group Operations
 - `create_group` - Create new groups with optional display name and description
 - `delete_group` - Delete existing groups
 - `find_groups` - Search for groups by name or stem (approximate matching)
 - `get_group_members` - Retrieve all members of a specific group
+- `get_group_member_count` - Return the total number of members in a group
 
 #### Member Operations
 - `add_group_member` - Add subjects to groups (with configurable source ID)
@@ -54,12 +59,20 @@ The server exposes 15 MCP tools for Grouper operations:
 #### Attribute Operations
 - `find_attribute_def_names` - Search for attribute definition names
 
+#### Server Operations
+- `restart_server` - Exit the server process so the MCP client restarts it
+
 ## Configuration
 
 ### Environment Variables Required
 - `GROUPER_BASE_URL` - Base URL of Grouper instance (e.g., https://grouper.institution.edu)
 - `GROUPER_USERNAME` - Grouper service account username
 - `GROUPER_PASSWORD` - Grouper service account password
+
+### Optional Environment Variables
+- `GROUPER_DEBUG` - Set to `true` or `1` to log full request/response payloads to
+  stderr. Off by default because the output includes member lists and subject
+  detail. Status and error lines are always logged.
 
 ### Configuration Files
 - `.env` - Local environment configuration (not committed to git)
@@ -78,6 +91,12 @@ cp .env.example .env
 
 # Run server standalone
 npm start
+
+# Run the unit/integration test suite (node-fetch is mocked; no live Grouper needed)
+npm test
+
+# Smoke-test credentials against a live Grouper instance
+npm run test:auth
 ```
 
 ## Usage with Claude Desktop
@@ -118,7 +137,7 @@ All endpoints are under `/web/servicesRest/v4_0_*`:
 - `/v4_0_220/groups` - Delete members
 - `/v4_0_270/attributeDefNames` - Find attribute definitions
 - `/v4_0_280/subjects` - Search subjects
-- `/v4_0_290/groups` - Check membership (has_member)
+- `/v4_0_290/groups/{groupName}/members` - Check membership (has_member)
 - `/v4_0_120/memberships` - Get memberships for tracing
 
 ## Security Considerations
@@ -143,9 +162,11 @@ Once integrated with Claude Desktop, you can use natural language:
 
 ## Technology Stack
 
-- **Runtime**: Node.js (ES modules)
-- **MCP SDK**: `@modelcontextprotocol/sdk` v1.0.0
-- **HTTP Client**: `node-fetch` v3.3.2
+- **Runtime**: Node.js >= 20 (ES modules)
+- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.30.0
+- **HTTP Client**: `node-fetch` ^3.3.2
+- **Config**: `dotenv` ^18.0.1
+- **Tests**: `jest` ^30.5.2 (ESM mode via `--experimental-vm-modules`)
 - **Transport**: stdio (standard input/output)
 
 ## Error Handling
@@ -153,13 +174,17 @@ Once integrated with Claude Desktop, you can use natural language:
 - Validates required environment variables on startup
 - Catches and reports Grouper API errors
 - Returns error responses with `isError: true` flag
-- Logs errors to stderr for debugging
+- Logs errors to stderr for debugging (verbose payload logging is gated behind `GROUPER_DEBUG`)
+- Never log the `Authorization` header or any part of the encoded credentials
 
 ## Project Structure
 
 ```
 grouper-mcp/
 ├── index.js              # Main server implementation
+├── test/
+│   └── integration.test.js  # Jest suite covering every tool handler
+├── test-auth.js          # Live credential/connectivity check
 ├── package.json          # Node.js dependencies and metadata
 ├── package-lock.json     # Locked dependency versions
 ├── .env                  # Local configuration (not in git)
@@ -173,6 +198,8 @@ grouper-mcp/
 
 - `@modelcontextprotocol/sdk` - Official MCP SDK for building servers
 - `node-fetch` - HTTP client for Node.js (ESM compatible)
+- `dotenv` - Loads `.env` from the server's own directory
+- `jest` (dev) - Test runner
 
 ## Contributing
 

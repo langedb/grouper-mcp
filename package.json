@@ -4,6 +4,9 @@
   "description": "MCP server for Grouper Web Services",
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node index.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles",
@@ -17,11 +20,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "dotenv": "^16.4.5",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^18.0.1",
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "jest": "^29.7.0"
+    "jest": "^30.5.2"
   }
 }

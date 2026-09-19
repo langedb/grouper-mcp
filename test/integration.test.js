@@ -651,7 +651,7 @@ describe('Grouper MCP Server Integration Tests', () => {
   });
 
   it('should trace direct membership', async () => {
-    mockFetch.mockResolvedValueOnce({
+    const immediateMembershipResponse = {
       ok: true,
       status: 200,
       text: () => Promise.resolve(JSON.stringify({
@@ -673,7 +673,12 @@ describe('Grouper MCP Server Integration Tests', () => {
           }]
         }
       })),
-    });
+    };
+
+    // Call 1: handleTraceMembership's initial membership lookup
+    mockFetch.mockResolvedValueOnce(immediateMembershipResponse);
+    // Call 2: traceMembershipRecursive's lookup for the same group
+    mockFetch.mockResolvedValueOnce(immediateMembershipResponse);
 
     const response = await handleTraceMembership({
       groupName: 'test:group',
@@ -685,13 +690,15 @@ describe('Grouper MCP Server Integration Tests', () => {
     expect(responseData.subject.id).toBe('testuser');
     expect(responseData.targetGroup.name).toBe('test:group');
     expect(responseData.membershipType).toBe('immediate');
-    expect(responseData.paths).toBeInstanceOf(Array);
-    expect(responseData.paths[0].type).toBe('direct');
+    expect(responseData.membershipPath).toBeInstanceOf(Array);
+    expect(responseData.membershipPath).toHaveLength(1);
+    expect(responseData.membershipPath[0].membershipType).toBe('immediate');
+    expect(responseData.membershipPath[0].groupName).toBe('test:group');
+    expect(responseData.pathSummary).toContain('Test Group');
   });
 
   it('should trace composite membership', async () => {
-    // First call - get membership with composite details
-    mockFetch.mockResolvedValueOnce({
+    const compositeMembershipResponse = {
       ok: true,
       status: 200,
       text: () => Promise.resolve(JSON.stringify({
@@ -726,9 +733,14 @@ describe('Grouper MCP Server Integration Tests', () => {
           }]
         }
       })),
-    });
+    };
 
-    // Second call - get all memberships to check composite factors
+    // Call 1: handleTraceMembership's initial membership lookup
+    mockFetch.mockResolvedValueOnce(compositeMembershipResponse);
+    // Call 2: traceMembershipRecursive's lookup for the composite group
+    mockFetch.mockResolvedValueOnce(compositeMembershipResponse);
+
+    // Call 3: all memberships, used to decide which composite factor applies
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -742,6 +754,26 @@ describe('Grouper MCP Server Integration Tests', () => {
       })),
     });
 
+    // Call 4: recursive trace into the left (eligible) group
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'immediate',
+            groupName: 'test:eligible',
+          }],
+          wsGroups: [{
+            name: 'test:eligible',
+            displayName: 'Eligible Users',
+            detail: { hasComposite: 'F' }
+          }],
+          wsSubjects: [{ id: 'testuser', name: 'Test User', sourceId: 'ldap' }]
+        }
+      })),
+    });
+
     const response = await handleTraceMembership({
       groupName: 'test:authorized',
       subjectId: 'testuser',
@@ -750,10 +782,19 @@ describe('Grouper MCP Server Integration Tests', () => {
     expect(response.isError).toBeUndefined();
     const responseData = JSON.parse(response.content[0].text);
     expect(responseData.membershipType).toBe('composite');
-    expect(responseData.paths).toBeInstanceOf(Array);
-    expect(responseData.paths[0].type).toBe('composite_complement');
-    expect(responseData.paths[0].leftGroup.name).toBe('test:eligible');
-    expect(responseData.paths[0].rightGroup.name).toBe('test:unauthorized');
+    expect(responseData.membershipPath).toBeInstanceOf(Array);
+
+    // The left-group path is walked first, then the composite group itself
+    expect(responseData.membershipPath[0].groupName).toBe('test:eligible');
+    expect(responseData.membershipPath[0].membershipType).toBe('immediate');
+
+    const composite = responseData.membershipPath[responseData.membershipPath.length - 1];
+    expect(composite.membershipType).toBe('composite');
+    expect(composite.compositeType).toBe('complement');
+    expect(composite.groupName).toBe('test:authorized');
+    expect(composite.leftGroup).toBe('test:eligible');
+    expect(composite.rightGroup).toBe('test:unauthorized');
+    expect(composite.pathThroughLeftGroup).toBe(true);
   });
 
   it('should handle non-existent membership in trace', async () => {

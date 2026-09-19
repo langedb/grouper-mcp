@@ -33,6 +33,10 @@ GROUPER_USERNAME=your_username
 GROUPER_PASSWORD=your_password
 ```
 
+Optionally set `GROUPER_DEBUG=true` to log full request and response payloads to
+stderr while troubleshooting. Leave it off in normal use - that output includes
+member lists and subject detail.
+
 ## Usage
 
 ### Running Standalone
@@ -127,6 +131,17 @@ Replace `/path/to/grouper-mcp` with the actual path to this directory.
 - **`find_attribute_def_names`**: Find attribute definition names
   - Parameters: `queryFilter`, `pageNumber` (optional), `pageSize` (optional)
 
+### Server Operations
+
+- **`restart_server`**: Exit the server process so the MCP client restarts it
+  - Parameters: none
+
+### Pagination
+
+Tools that can return large result sets accept optional `pageNumber` (1-indexed)
+and `pageSize` arguments. When a response would exceed roughly 50KB the server
+returns one page plus pagination metadata describing how to fetch the rest.
+
 ## Example Prompts
 
 Once configured with Claude Desktop, you can use natural language prompts like:
@@ -148,9 +163,11 @@ Run the test suite:
 npm test
 ```
 
-Test authentication with your Grouper instance:
+The suite mocks `node-fetch`, so it runs without a live Grouper instance.
+
+Test authentication against your real Grouper instance:
 ```bash
-node test-auth.js
+npm run test:auth
 ```
 
 ## Security Notes
@@ -159,6 +176,10 @@ node test-auth.js
 - Basic authentication is used to connect to Grouper Web Services
 - Ensure your `.env` file is added to `.gitignore` and never committed to version control
 - Use appropriate file permissions to protect your credentials
+
+## Requirements
+
+Node.js 20 or newer.
 
 ## API Version
 
