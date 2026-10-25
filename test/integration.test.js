@@ -651,6 +651,32 @@ describe('Grouper MCP Server Integration Tests', () => {
   });
 
   it('should trace direct membership', async () => {
+    // First call - main membership check
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'immediate',
+            groupName: 'test:group',
+          }],
+          wsGroups: [{
+            name: 'test:group',
+            displayName: 'Test Group',
+            description: 'A test group',
+            detail: { hasComposite: 'F' }
+          }],
+          wsSubjects: [{
+            id: 'testuser',
+            name: 'Test User',
+            sourceId: 'ldap'
+          }]
+        }
+      })),
+    });
+
+    // Second call - recursive trace (will also get immediate membership)
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -685,12 +711,17 @@ describe('Grouper MCP Server Integration Tests', () => {
     expect(responseData.subject.id).toBe('testuser');
     expect(responseData.targetGroup.name).toBe('test:group');
     expect(responseData.membershipType).toBe('immediate');
-    expect(responseData.paths).toBeInstanceOf(Array);
-    expect(responseData.paths[0].type).toBe('direct');
+    expect(responseData.membershipPath).toBeDefined();
+    expect(responseData.membershipPath).toBeInstanceOf(Array);
+    expect(responseData.membershipPath.length).toBe(1);
+    expect(responseData.membershipPath[0].membershipType).toBe('immediate');
+    expect(responseData.membershipPath[0].groupName).toBe('test:group');
+    expect(responseData.pathSummary).toContain('Test User');
+    expect(responseData.pathSummary).toContain('Test Group');
   });
 
   it('should trace composite membership', async () => {
-    // First call - get membership with composite details
+    // First call - main membership check with composite details
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -728,7 +759,45 @@ describe('Grouper MCP Server Integration Tests', () => {
       })),
     });
 
-    // Second call - get all memberships to check composite factors
+    // Second call - recursive trace (will also get composite membership)
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'composite',
+            groupName: 'test:authorized',
+          }],
+          wsGroups: [{
+            name: 'test:authorized',
+            displayName: 'Authorized Users',
+            description: 'Authorized users',
+            detail: {
+              hasComposite: 'T',
+              compositeType: 'complement',
+              leftGroup: {
+                name: 'test:eligible',
+                displayName: 'Eligible Users',
+                description: 'Eligible users'
+              },
+              rightGroup: {
+                name: 'test:unauthorized',
+                displayName: 'Unauthorized Users',
+                description: 'Blocked users'
+              }
+            }
+          }],
+          wsSubjects: [{
+            id: 'testuser',
+            name: 'Test User',
+            sourceId: 'ldap'
+          }]
+        }
+      })),
+    });
+
+    // Third call - get all memberships to check composite factors
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -742,6 +811,31 @@ describe('Grouper MCP Server Integration Tests', () => {
       })),
     });
 
+    // Fourth call - recursive trace of left group membership
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        WsGetMembershipsResults: {
+          wsMemberships: [{
+            membershipType: 'immediate',
+            groupName: 'test:eligible',
+          }],
+          wsGroups: [{
+            name: 'test:eligible',
+            displayName: 'Eligible Users',
+            description: 'Eligible users',
+            detail: { hasComposite: 'F' }
+          }],
+          wsSubjects: [{
+            id: 'testuser',
+            name: 'Test User',
+            sourceId: 'ldap'
+          }]
+        }
+      })),
+    });
+
     const response = await handleTraceMembership({
       groupName: 'test:authorized',
       subjectId: 'testuser',
@@ -750,10 +844,20 @@ describe('Grouper MCP Server Integration Tests', () => {
     expect(response.isError).toBeUndefined();
     const responseData = JSON.parse(response.content[0].text);
     expect(responseData.membershipType).toBe('composite');
-    expect(responseData.paths).toBeInstanceOf(Array);
-    expect(responseData.paths[0].type).toBe('composite_complement');
-    expect(responseData.paths[0].leftGroup.name).toBe('test:eligible');
-    expect(responseData.paths[0].rightGroup.name).toBe('test:unauthorized');
+    expect(responseData.membershipPath).toBeDefined();
+    expect(responseData.membershipPath).toBeInstanceOf(Array);
+    // Should have at least 2 entries: the immediate membership in left group + the composite group
+    expect(responseData.membershipPath.length).toBeGreaterThanOrEqual(2);
+    // First entry should be immediate membership in left group
+    expect(responseData.membershipPath[0].membershipType).toBe('immediate');
+    expect(responseData.membershipPath[0].groupName).toBe('test:eligible');
+    // Last entry should be the composite group
+    const lastEntry = responseData.membershipPath[responseData.membershipPath.length - 1];
+    expect(lastEntry.membershipType).toBe('composite');
+    expect(lastEntry.compositeType).toBe('complement');
+    expect(lastEntry.leftGroup).toBe('test:eligible');
+    expect(lastEntry.rightGroup).toBe('test:unauthorized');
+    expect(responseData.pathSummary).toContain('Test User');
   });
 
   it('should handle non-existent membership in trace', async () => {

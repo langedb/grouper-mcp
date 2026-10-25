@@ -148,6 +148,14 @@ Once integrated with Claude Desktop, you can use natural language:
 - **HTTP Client**: `node-fetch` v3.3.2
 - **Transport**: stdio (standard input/output)
 
+## Development Guidelines
+
+### Token Efficiency
+All tool responses must use compact JSON formatting to minimize token usage:
+- ✅ Use `JSON.stringify(response)` (compact)
+- ❌ Never use `JSON.stringify(response, null, 2)` (pretty-printed)
+- This applies to all existing and future tool implementations
+
 ## Error Handling
 
 - Validates required environment variables on startup
