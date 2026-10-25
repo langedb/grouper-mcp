@@ -4,7 +4,7 @@ import fetch from 'node-fetch';
 import * as dotenv from 'dotenv';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const GROUPER_BASE_URL = process.env.GROUPER_BASE_URL;
 const GROUPER_USERNAME = process.env.GROUPER_USERNAME;

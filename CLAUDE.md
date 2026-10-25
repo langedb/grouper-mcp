@@ -163,11 +163,19 @@ Once integrated with Claude Desktop, you can use natural language:
 ## Technology Stack
 
 - **Runtime**: Node.js >= 20 (ES modules)
-- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.30.0
+- **MCP SDK**: `@modelcontextprotocol/sdk` ^1.32.2
 - **HTTP Client**: `node-fetch` ^3.3.2
-- **Config**: `dotenv` ^18.0.1
+- **Config**: `dotenv` ^18.0.9
 - **Tests**: `jest` ^30.5.2 (ESM mode via `--experimental-vm-modules`)
 - **Transport**: stdio (standard input/output)
+
+## Development Guidelines
+
+### Token Efficiency
+All tool responses must use compact JSON formatting to minimize token usage:
+- ✅ Use `JSON.stringify(response)` (compact)
+- ❌ Never use `JSON.stringify(response, null, 2)` (pretty-printed)
+- This applies to all existing and future tool implementations
 
 ## Error Handling
 
